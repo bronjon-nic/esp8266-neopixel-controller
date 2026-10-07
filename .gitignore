@@ -1,0 +1,21 @@
+# PlatformIO build outputs & libraries
+.pio
+.pioenvs
+.piolibdeps
+
+# Clangd & indexing caches
+.cache
+compile_commands.json
+.clangd
+
+# VS Code settings (contains machine-specific paths)
+.vscode/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Temporary & dummy files
+.dummy
