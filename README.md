@@ -43,21 +43,33 @@ Designed for both **Wemos D1 Mini** (16-LED Circular Ring) and **ESP-01S** (4x4 
 - [PlatformIO Core or PlatformIO IDE](https://platformio.org/)
 - VS Code or your preferred editor
 
-### 2. Configure Wi-Fi & Settings
+### 2. Configure Access Point & Settings
 Edit `include/config.h`:
 ```cpp
-// Wi-Fi Credentials
-#define WIFI_SSID     "Your-WiFi-SSID"
-#define WIFI_PASSWORD "Your-WiFi-Password"
+// Access point credentials (WPA2 password must have 8+ characters)
+#define AP_SSID       "ESP8266-NeoPixel"
+#define AP_PASSWORD   "change-me"
 
 // OTA Configuration
 #define OTA_HOSTNAME  "wemos-d1mini-ota"
 #define OTA_PORT      8266
 
 // NeoPixel Configuration
+#define NEOPIXEL_LAYOUT_RING       0
+#define NEOPIXEL_LAYOUT_MATRIX_4X4 1
+// Optional override. Without this line, D1 Mini builds select RING and
+// ESP-01S builds select MATRIX_4X4 automatically.
+#define NEOPIXEL_LAYOUT NEOPIXEL_LAYOUT_RING
 #define MAX_LEDS            16
 #define NEOPIXEL_BRIGHTNESS 15  // Safe brightness (0-255)
 ```
+
+On boot, connect your phone or computer to the configured AP and open
+`http://192.168.4.1`. Router Wi-Fi credentials are not required.
+
+Switch `NEOPIXEL_LAYOUT` between `NEOPIXEL_LAYOUT_RING` and
+`NEOPIXEL_LAYOUT_MATRIX_4X4` when using a different physical display. The
+selected layout is reported in the web dashboard status.
 
 ### 3. Build & Upload Firmware
 
@@ -80,9 +92,9 @@ pio run -e esp01_1m_ota -t upload
 
 ## 🌐 Web Dashboard Usage
 
-1. Open your serial monitor at **115200 baud** after booting (`pio device monitor`).
-2. Note the assigned local IP address (e.g. `http://192.168.1.100`) or mDNS hostname.
-3. Open the IP address in your browser to access the control panel.
+1. Connect to the configured `AP_SSID` using `AP_PASSWORD`.
+2. Open `http://192.168.4.1` in your browser to access the control panel.
+3. For ESP-01S OTA, keep the computer connected to this AP and run the OTA upload command.
 4. Toggle power, change animations, select custom colors, and set brightness on the fly.
 
 ---

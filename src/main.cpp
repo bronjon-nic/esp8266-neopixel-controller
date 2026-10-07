@@ -7,7 +7,8 @@
 #include <Adafruit_NeoPixel.h>
 #include "config.h"
 
-// Initialize NeoPixel strip for 16-LED Circular Ring
+// Both supported layouts contain 16 NeoPixels; NEOPIXEL_LAYOUT records their
+// physical arrangement for the dashboard and configuration.
 Adafruit_NeoPixel strip(MAX_LEDS, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 
 // Initialize Web Server on Port 80
@@ -25,6 +26,7 @@ String currentMode = "spinner"; // Default mode: Comet Spinner
 bool stripDirty = true;
 bool otaInitialized = false;
 bool webServerInitialized = false;
+bool accessPointStarted = false;
 
 unsigned long lastAnimationUpdate = 0;
 unsigned long lastStatusPrint = 0;
@@ -38,7 +40,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Wemos D1 Mini - 16 LED Ring</title>
+  <title>ESP8266 NeoPixel Dashboard</title>
   <style>
     :root {
       --bg-color: #0b132b;
@@ -75,19 +77,19 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <body>
   <div class="container">
     <div class="header">
-      <h1>16-LED Ring Dashboard</h1>
+      <h1>16-LED Dashboard</h1>
       <span class="badge" id="statusBadge">ONLINE</span>
     </div>
 
     <button class="btn power-btn power-off" id="powerBtn" onclick="togglePower()">POWER ON</button>
 
     <div class="section">
-      <label>Symmetrical Ring Zones</label>
+      <label>LED Zones</label>
       <div class="btn-grid-4">
-        <button class="btn active" id="zone-all" onclick="setZone('all')">Full Ring</button>
-        <button class="btn" id="zone-quarter" onclick="setZone('quarter')">4 Quarters</button>
+        <button class="btn active" id="zone-all" onclick="setZone('all')">Full Display</button>
+        <button class="btn" id="zone-quarter" onclick="setZone('quarter')">Every 4th</button>
         <button class="btn" id="zone-cross" onclick="setZone('cross')">8 Cross</button>
-        <button class="btn" id="zone-halves" onclick="setZone('halves')">Top Half</button>
+        <button class="btn" id="zone-halves" onclick="setZone('halves')">First Half</button>
       </div>
     </div>
 
@@ -97,7 +99,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     </div>
 
     <div class="section">
-      <label>Circular Ring Animations</label>
+      <label>Animation Effects</label>
       <div class="btn-grid">
         <button class="btn active" id="mode-spinner" onclick="setMode('spinner')">🌀 Comet Spinner</button>
         <button class="btn" id="mode-orbit" onclick="setMode('orbit')">☯️ Dual Orbit</button>
@@ -127,6 +129,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
     <div class="section">
       <label>Brightness <span class="val-disp" id="brightVal">15</span></label>
+      <div class="val-disp" id="layoutLabel"></div>
       <input type="range" id="brightnessSlider" min="0" max="255" value="15" oninput="updateBrightness(this.value)">
     </div>
   </div>
@@ -162,6 +165,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       document.getElementById('brightnessSlider').value = state.brightness;
       document.getElementById('brightVal').innerText = state.brightness;
       document.getElementById('colorPicker').value = '#' + state.color;
+      document.getElementById('layoutLabel').innerText = state.layout || '';
     }
 
     function sendCmd(params) {
@@ -216,7 +220,7 @@ bool isPixelInActiveZone(int i) {
 }
 
 void applyWifiStatusOverlay() {
-  if (WiFi.status() != WL_CONNECTED) {
+    if (!accessPointStarted) {
     float pulseFactor = 0.15f + 0.85f * ((sin(millis() * 0.005f) + 1.0f) / 2.0f);
     uint8_t redVal = (uint8_t)(180 * pulseFactor);
 
@@ -248,14 +252,15 @@ void handleStatus() {
 
   char jsonBuf[256];
   snprintf(jsonBuf, sizeof(jsonBuf),
-           "{\"power\":%s,\"mode\":\"%s\",\"zone\":\"%s\",\"num_leds\":%u,\"max_leds\":%u,\"brightness\":%u,\"color\":\"%s\"}",
+           "{\"power\":%s,\"mode\":\"%s\",\"zone\":\"%s\",\"num_leds\":%u,\"max_leds\":%u,\"brightness\":%u,\"color\":\"%s\",\"layout\":\"%s\"}",
            powerOn ? "true" : "false",
            currentMode.c_str(),
            activeZone.c_str(),
            activeNumLeds,
            MAX_LEDS,
            currentBrightness,
-           hexColor);
+           hexColor,
+           NEOPIXEL_LAYOUT_NAME);
 
   server.send(200, "application/json", jsonBuf);
 }
@@ -299,51 +304,29 @@ void handleSet() {
   handleStatus();
 }
 
-void setupWiFi() {
+void setupAccessPoint() {
   Serial.println(F("\n=================================================="));
-  Serial.println(F("         CONNECTING WEMOS D1 MINI TO WI-FI        "));
+  Serial.println(F("          STARTING ESP8266 ACCESS POINT           "));
   Serial.println(F("=================================================="));
-  Serial.printf("Connecting to SSID: %s\n", WIFI_SSID);
+  Serial.printf("Access point SSID: %s\n", AP_SSID);
 
   strip.clear();
   strip.setPixelColor(0, strip.Color(120, 0, 0));
   strip.show();
 
   WiFi.persistent(false);
-  WiFi.mode(WIFI_STA);
-  WiFi.disconnect(true);
-  delay(100);
+  WiFi.mode(WIFI_AP);
+  accessPointStarted = WiFi.softAP(AP_SSID, AP_PASSWORD);
 
-  WiFi.setAutoReconnect(true);
-  WiFi.hostname(OTA_HOSTNAME);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  WiFi.setSleepMode(WIFI_NONE_SLEEP); // MUST be after WiFi.begin()!
-
-  unsigned long startTime = millis();
-
-  while (WiFi.status() != WL_CONNECTED) {
-    if (millis() - startTime > 15000) {
-      Serial.println(F("\n[ERROR] Wi-Fi connection timed out!"));
-      break;
-    }
-    delay(500);
-    yield();
-    Serial.print(F("."));
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    WiFi.setSleepMode(WIFI_NONE_SLEEP); // Ensure modem sleep remains disabled
-    Serial.println(F("\n[SUCCESS] Wi-Fi Connected!"));
-    Serial.printf("  - IP Address  : %s\n", WiFi.localIP().toString().c_str());
-    Serial.printf("  - Hostname    : %s.local\n", OTA_HOSTNAME);
-    Serial.printf("  - Signal RSSI : %d dBm\n", WiFi.RSSI());
+  if (accessPointStarted) {
+    Serial.println(F("[SUCCESS] Access point started."));
+    Serial.printf("  - Connect to  : %s\n", AP_SSID);
+    Serial.printf("  - Dashboard   : http://%s\n", WiFi.softAPIP().toString().c_str());
+    Serial.printf("  - OTA Address : %s:%u\n", WiFi.softAPIP().toString().c_str(), OTA_PORT);
     strip.clear();
     strip.show();
-
-    // Note: mDNS disabled to prevent LwIP timeouts.c multicast timer crash on ESP8266
-    Serial.println(F("[INFO] Network ready."));
   } else {
-    Serial.println(F("\n[WARN] Operating in offline mode. Auto-reconnect enabled."));
+    Serial.println(F("[ERROR] Unable to start access point."));
   }
   Serial.println(F("==================================================\n"));
 }
@@ -410,7 +393,7 @@ void setupWebServer() {
 
 void animateLEDs() {
   if (!powerOn) {
-    if (WiFi.status() != WL_CONNECTED || stripDirty) {
+    if (!accessPointStarted || stripDirty) {
       stripDirty = false;
       strip.clear();
       applyWifiStatusOverlay();
@@ -421,7 +404,7 @@ void animateLEDs() {
 
   // 1. Solid Color Mode
   if (currentMode == "solid") {
-    if (stripDirty || WiFi.status() != WL_CONNECTED) {
+    if (stripDirty || !accessPointStarted) {
       stripDirty = false;
       for (int i = 0; i < MAX_LEDS; i++) {
         if (isPixelInActiveZone(i)) {
@@ -681,26 +664,19 @@ void setup() {
 
   delay(500);
 
-  setupWiFi();
+  setupAccessPoint();
 
-  if (WiFi.status() == WL_CONNECTED) {
+  if (accessPointStarted) {
     setupOTA();
     setupWebServer();
   }
 }
 
 void loop() {
-  static unsigned long lastWifiCheck = 0;
-  static bool isConnected = false;
-
-  // Throttle WiFi status checks to once per second (1000ms)
-  if (millis() - lastWifiCheck >= 1000) {
-    lastWifiCheck = millis();
-    isConnected = (WiFi.status() == WL_CONNECTED);
-  }
-
-  if (isConnected) {
+  if (otaInitialized) {
     ArduinoOTA.handle();
+  }
+  if (webServerInitialized) {
     server.handleClient();
   }
 
